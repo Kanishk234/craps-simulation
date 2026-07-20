@@ -1,90 +1,146 @@
-# The Craps Machine — Core Simulation
+<div align="center">
 
-Plays 2^20 (1,048,576) games of the craps pass line + hard-8 side bet,
-writes `results.csv`, and a Python script turns it into the three plots.
+# 🎲 The Craps Machine
+### Measuring House Edge in Silicon
 
-## Files
+**ECE 316 Digital Logic Design × ECE 351K Probability — Winners Dinner 3**
+
+Kanishk Sama · Krithik Sama · Aditya Patra · Sean Nievera
+
+</div>
+
+---
+
+## What this is
+
+A Verilog machine that plays the casino game of **craps** — the pass-line bet plus a hard-8 side bet — over a million times, and checks whether its measured win rates converge to the values probability theory predicts *before* the machine is ever run.
+
+The same design does two things:
+- **In simulation** it plays 1,048,576 games and writes the results to a CSV, which a Python script turns into the convergence and house-edge plots.
+- **On a Basys3 FPGA** it plays 10,000 games per button press and shows the result live on the 7-segment display, or lets you play craps by hand one roll at a time.
+
+| Bet | Theory says P(win) | House edge |
+|:--|:--:|:--:|
+| Pass line | 244/495 ≈ **0.4929** | 1.41% |
+| Hard 8 (pays 9:1) | 1/11 ≈ **0.0909** | 9.09% |
+
+---
+
+## 📁 Project layout
+
 ```
-src/lfsr.v           parameterized maximal LFSR (different taps per die)
-src/die_gen.v        rejection sampling + valid handshake
-src/passline_fsm.v   the pass-line game FSM (2 states + point register)
-src/hardways_fsm.v   hard-8 watcher (permanently armed by construction)
-src/craps_core.v     top: dice -> decode -> both FSMs
-tb/tb_craps.v        testbench: power-of-two CSV snapshots
-tb/tb_board.v        board top-level testbench (verified before hardware)
-src/board/top.v      Basys3 top: stats mode + play mode
-src/board/debounce.v      button synchronizer/debouncer
-src/board/bin2bcd.v       double-dabble binary -> BCD
-src/board/sevenseg_display.v   4-digit multiplexed display driver
-constraints/basys3.xdc    pin constraints (Basys3 master names)
-analysis/plot_results.py   makes the three plots + summary table
-sample_output/       a verified run: results.csv + the three PNGs
-```
+design/                  the hardware (synthesizable Verilog)
+├── lfsr.v               maximal-length LFSR (parameterized taps)
+├── die_gen.v           one die: rejection sampling + valid handshake
+├── passline_fsm.v      pass-line game FSM (2 states + point register)
+├── hardways_fsm.v      hard-8 side-bet watcher (always armed)
+├── craps_core.v        top of the core: dice → decode → both FSMs
+└── board/              FPGA-only I/O wrapper
+    ├── top.v           board top level: stats mode + play mode
+    ├── debounce.v      button synchronizer / debouncer
+    ├── bin2bcd.v       binary → BCD (double-dabble)
+    └── sevenseg_display.v   4-digit multiplexed display driver
 
-## Board demo (Basys3)
-Two modes, selected by SW0. BTNU = reset, BTNC = action.
-* **SW0=0, stats mode:** each BTNC press plays a fresh batch of exactly
-  10,000 games (~0.6 ms of real time) and shows the WIN COUNT on the
-  7-seg -- expected ~4929, i.e. the win rate x 10^4, no divider needed.
-  The LFSRs keep state between presses, so repeated presses are
-  independent samples scattering within ~ +/-100 (2 sigma) of 4929:
-  the sampling distribution, live.
-* **SW0=1, play mode:** each press rolls once. Display shows
-  [die1][die2][sum]; LED0/1 = come-out/point phase, LED5:2 = point
-  value, LED6 = last game won, LED7 = last game lost.
+tb/                      testbenches (simulation only, not synthesized)
+├── tb_craps.v          runs 2²⁰ games, writes results.csv
+└── tb_board.v          verifies both board modes before hardware
 
-To build: add `src/` + `src/board/` as design sources (top = `top`),
-add `constraints/basys3.xdc`, Run Synthesis -> Implementation ->
-Generate Bitstream, then Hardware Manager -> Program Device.
-`tb_board` verifies both modes in simulation first (uses shrunk
-debounce/batch parameters so presses simulate fast).
+constraints/
+└── basys3.xdc          Basys3 pin assignments
 
-## Running in Vivado
-1. New project (no board needed for simulation) → add all files in `src/`
-   as design sources and `tb/tb_craps.v` as a **simulation source**.
-2. Make sure `tb_craps` is the simulation top (right-click → Set as Top).
-3. **Important:** the default 1000 ns runtime is nowhere near enough.
-   Either type `run -all` in the Tcl console after launching, or set
-   Settings → Simulation → xsim.simulate.runtime to `-all`.
-4. Run Behavioral Simulation. Takes a couple of minutes; the Tcl console
-   prints a summary when done.
-5. Find `results.csv` where xsim runs (type `pwd` in the Tcl console):
-   `<project>/<project>.sim/sim_1/behav/xsim/results.csv`
-6. Copy `analysis/plot_results.py` next to it and run
-   `python3 plot_results.py` (needs `pip install pandas matplotlib`).
+analysis/
+└── plot_results.py     turns results.csv into the three plots
 
-## Quick local check without Vivado (optional)
-Icarus Verilog runs the same code:
-```
-iverilog -o craps_sim src/*.v tb/tb_craps.v && vvp craps_sim
-python3 analysis/plot_results.py    # run in the same directory as results.csv
+output/                  generated results (CSV + PNGs land here)
+README.md                this file
 ```
 
-## Verified results (the run in sample_output/)
+> **Design vs. testbench:** everything in `design/` becomes real hardware. Everything in `tb/` exists only to exercise it in simulation — the `$fopen`/`$fdisplay` file writes could never run on a chip.
+
+---
+
+## ▶️ Part 1 — Running the simulation (the graded result)
+
+This produces the win-rate data and plots.
+
+### Step 1 · Simulate in Vivado
+1. Add every file in `design/` **and** `design/board/` as *design sources*, and `tb/tb_craps.v` as a *simulation source*.
+2. Set `tb_craps` as the simulation top: right-click it → **Set as Top**.
+3. **Run Behavioral Simulation.** The default runtime (1000 ns) is far too short — in the **Tcl Console**, type:
+   ```
+   run -all
+   ```
+4. Wait ~2 minutes. When it finishes, the console prints a summary and writes `results.csv`.
+
+### Step 2 · Find the CSV
+In the Tcl Console, type `pwd` to see where the simulator ran. The file is at:
+```
+<project>/<project>.sim/sim_1/behav/xsim/results.csv
+```
+
+### Step 3 · Make the plots
+Copy `analysis/plot_results.py` next to `results.csv`, then from a normal terminal:
+```
+pip install pandas matplotlib
+python plot_results.py
+```
+This writes three PNGs and prints a measured-vs-theory table.
+
+> **No Python on the lab machine?** The handout's fallback works: double-click `results.csv` to open it in Excel and chart the columns there.
+
+### What you should see
+The run is deterministic, so these numbers are exact every time:
+
 | Quantity | Measured | Theory | Gap |
-|---|---|---|---|
-| Pass-line win rate | 0.492978 | 244/495 = 0.492929 | 0.000049 (1σ = 0.000488) |
-| Hard-8 win rate | 0.090832 | 1/11 = 0.090909 | 0.000077 (1σ = 0.000276) |
-| Rolls per game | 3.3714 | 557/165 = 3.3758 | — |
-| Pass-line house edge | 1.404% | 1.414% | — |
-| Hard-8 house edge | 9.168% | 9.091% | — |
+|:--|:--:|:--:|:--:|
+| Pass-line win rate | 0.492978 | 0.492929 | 0.10 σ |
+| Hard-8 win rate | 0.090832 | 0.090909 | 0.28 σ |
+| Rolls per game | 3.3714 | 3.3758 | — |
 
-## Where each piece of TA feedback lives
-1. **Different polynomials** → `craps_core.v`: die 1 is a 24-bit LFSR
-   (taps 24,23,22,17), die 2 a 23-bit LFSR (taps 23,18) — different
-   polynomials *and* widths.
-2. **Don't log every roll** → `tb_craps.v`: snapshots only when
-   `(games & (games-1)) == 0` (powers of two, ~20 file writes), which
-   also spaces the points evenly for the log-log plot.
-3. **≥20-bit counters** → all counters are 32-bit (`passline_fsm.v`,
-   `hardways_fsm.v`).
-4. **Ready/valid handshake** → `die_gen.v` raises `valid`;
-   `craps_core.v` strobes only on `valid1 & valid2`.
-5. **Hard-8 re-arm timing** → `hardways_fsm.v`: permanently armed by
-   construction; it evaluates every strobe and cannot miss a roll.
+| Plot | Shows |
+|:--|:--|
+| `convergence.png` | both win rates settling onto their theoretical lines |
+| `error_loglog.png` | the error shrinking at the Law-of-Large-Numbers rate (slope −½) |
+| `house_edge.png` | measured vs. exact house edge for both bets |
 
-## One subtlety worth knowing (LFSR stepping)
-The LFSR advances **4 bits per attempt**, not 3. Stepping by k shortens
-the state cycle by gcd(k, 2^WIDTH - 1), and 2^WIDTH - 1 is divisible by
-3 for even widths — stepping by 3 would cut the period to a third.
-gcd(4, odd) = 1 keeps the full period. Good Q&A ammo.
+---
+
+## 🎛️ Part 2 — The board demo (Basys3)
+
+The same core, synthesized to hardware, with two modes.
+
+### Build & program
+1. Add `design/` + `design/board/` as design sources and set **`top`** as the top module.
+2. Add `constraints/basys3.xdc`.
+3. Confirm the part is **xc7a35tcpg236-1**.
+4. **Generate Bitstream** (runs synthesis + implementation first), then **Open Hardware Manager → Program Device**.
+
+> Before building, run `tb/tb_board.v` in simulation — it verifies both modes with shrunk timing parameters so you catch logic bugs on your PC, not on the board.
+
+### Controls
+
+| Control | Does |
+|:--|:--|
+| **BTNU** | Reset (also restarts the dice sequence) |
+| **BTNC** | Action: run a batch (stats) / roll once (play) |
+| **SW0** | Mode: **down = stats**, **up = play** |
+
+### Stats mode (SW0 down)
+Each press plays **10,000 fresh games** in ~0.6 ms and shows the **win count** — which equals the win rate × 10⁴, so the display reads **≈ 4929**. Because the design is deterministic, the first press after reset always shows exactly **4934**; repeated presses scatter within about ±100 (that scatter *is* the sampling distribution, shown live).
+
+### Play mode (SW0 up)
+Each press rolls once. The display shows `[die1][die2][sum]`, and the LEDs walk the game: LED0 = come-out phase, LED1 = point phase, LED5:2 = current point (binary), LED6 = last game won, LED7 = last game lost.
+
+> A full operator's guide — every LED, every quirk, and what to say for each — is in **`BOARD_MANUAL.md`**.
+
+---
+
+## 🧠 How it works, in one paragraph
+
+Two LFSRs (with **different feedback polynomials**, so they aren't just time-shifted copies of each other) each feed a **rejection sampler** that turns 3 random bits into a fair 1–6 die — rejecting the values 6 and 7 so every face is exactly 1/6 rather than biased. When both dice report `valid`, one roll is decoded into a sum and a "pair" flag, and that single roll is watched by two state machines at once: the **pass-line FSM** (come-out ⇄ point) and the **hard-8 watcher**. Running counters tally wins, games, and rolls; the testbench snapshots them at powers of two to keep file writes small and the log-log plot evenly spaced.
+
+---
+
+## ✅ Submission contents
+
+Verilog sources (`design/`), testbenches (`tb/`), `results.csv`, and the plots — **no** build artifacts (`.bit`, `.jou`, logs, or the `.sim` project directory).
