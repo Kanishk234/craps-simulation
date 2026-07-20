@@ -97,11 +97,18 @@ The run is deterministic, so these numbers are exact every time:
 | Hard-8 win rate | 0.090832 | 0.090909 | 0.28 σ |
 | Rolls per game | 3.3714 | 3.3758 | — |
 
-| Plot | Shows |
-|:--|:--|
-| `convergence.png` | both win rates settling onto their theoretical lines |
-| `error_loglog.png` | the error shrinking at the Law-of-Large-Numbers rate (slope −½) |
-| `house_edge.png` | measured vs. exact house edge for both bets |
+And the three plots the script generates:
+
+**Both win rates converge onto their theoretical values**
+![Convergence of both win rates](output/convergence.png)
+
+**The error shrinks at exactly the Law-of-Large-Numbers rate (slope −½ on log–log axes)**
+![Log-log error decay](output/error_loglog.png)
+
+**Measured house edge matches theory for both bets**
+![House edge, measured vs exact](output/house_edge.png)
+
+> These images were produced by the run described above. If they don't display, check that the PNGs are in `output/` and that the paths match your folder names.
 
 ---
 
